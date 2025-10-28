@@ -22,6 +22,7 @@ import { useState } from "react";
 import { makeQueryClient } from "./query-client";
 import type { AppRouter } from "./routers/_app";
 import superjson from "superjson";
+import { useAuth } from "@clerk/nextjs";
 
 // Create the tRPC React helper, typed by the AppRouter
 export const trpc = createTRPCReact<AppRouter>();
@@ -67,6 +68,7 @@ export function TRPCProvider(
     children: React.ReactNode;
   }>
 ) {
+  const { getToken } = useAuth();
   // NOTE: Avoid useState when initializing the query client if you don't
   //       have a suspense boundary between this and the code that may
   //       suspend because React will throw away the client on the initial
@@ -79,6 +81,18 @@ export function TRPCProvider(
         httpBatchLink({
           transformer: superjson,
           url: getUrl(),
+          async headers() {
+            const token = await getToken({ skipCache: true });
+            return {
+              authorization: token ? `Bearer ${token}` : undefined,
+            };
+          },
+          fetch(url, options) {
+            return fetch(url as RequestInfo, {
+              ...(options as RequestInit),
+              credentials: "include", // This ensures Clerk auth cookies are sent with every request
+            });
+          },
         }),
       ],
     })
