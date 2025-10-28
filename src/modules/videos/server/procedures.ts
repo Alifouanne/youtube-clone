@@ -4,9 +4,28 @@ import { mux } from "@/lib/mux";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
+import z from "zod";
 
 // This router provides endpoints for video mutations, such as updating video details and creating new video uploads.
 export const videoRouter = createTRPCRouter({
+  remove: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { id: userId } = ctx.user;
+      const [removedVideo] = await db
+        .delete(videoTable)
+        .where(
+          and(eq(videoTable.id, input.id), eq(videoTable.uploaderId, userId))
+        )
+        .returning();
+      if (!removedVideo) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "no video found to delete",
+        });
+      }
+      return removedVideo;
+    }),
   update: protectedProcedure
     .input(videoUpdateSchema)
     .mutation(async ({ ctx, input }) => {
@@ -39,6 +58,7 @@ export const videoRouter = createTRPCRouter({
           message: "There is no updated video found",
         });
       }
+      return updatedVideo;
     }),
   create: protectedProcedure.mutation(async ({ ctx }) => {
     // Create a new video upload on Mux for the current user

@@ -15,6 +15,8 @@ import superjson from "superjson";
  */
 export const createTRPCContext = async () => {
   const { userId } = await auth();
+
+  // const userId=await currentUser()
   return { clerkUserId: userId };
 };
 

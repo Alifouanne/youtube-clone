@@ -27,6 +27,7 @@ const VideoThumbnail = ({
           className="size-full object-cover group-hover:opacity-0 transition-opacity duration-300 ease-in-out"
           priority={false}
           loading="lazy"
+          unoptimized
         />
         <Image
           src={previewUrl || "/placeholder.svg"}

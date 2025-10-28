@@ -51,6 +51,7 @@ import {
 import VideoPlayer from "@/modules/videos/ui/components/VideoPlayer";
 import Link from "next/link";
 import { snakeCaseToTitle } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 interface FormSectionProps {
   videoId: string;
 }
@@ -75,6 +76,7 @@ const FormSection = ({ videoId }: FormSectionProps) => {
 };
 
 const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const [video] = trpc.studio.getOne.useSuspenseQuery({ id: videoId });
   const [categories] = trpc.categories.getMany.useSuspenseQuery();
@@ -83,6 +85,16 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
       utils.studio.getMany.invalidate();
       utils.studio.getOne.invalidate({ id: videoId });
       toast.success("You Updated video details");
+    },
+    onError: () => {
+      toast.error("Something went wrong");
+    },
+  });
+  const remove = trpc.videos.remove.useMutation({
+    onSuccess: () => {
+      utils.studio.getMany.invalidate();
+      toast.success("You video removed ");
+      router.push("/studio");
     },
     onError: () => {
       toast.error("Something went wrong");
@@ -133,7 +145,7 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => remove.mutate({ id: videoId })}>
                 <TrashIcon className="size-4 mr-2" /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -312,7 +324,7 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
               control={form.control}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="form-video-categoryId">
+                  <FieldLabel htmlFor="form-video-visibility">
                     Visibility
                   </FieldLabel>
 
@@ -321,7 +333,7 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                     value={field.value || undefined}
                   >
                     <SelectTrigger
-                      id="form-video-categoryId"
+                      id="form-video-visibility"
                       aria-invalid={fieldState.invalid}
                     >
                       <SelectValue placeholder="Select a visibility" />
