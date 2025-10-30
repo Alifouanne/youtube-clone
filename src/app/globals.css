@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@clerk/themes/shadcn.css";
+@import "uploadthing/tw/v4";
+@source "../../node_modules/@uploadthing/react/dist";
 @plugin "@midudev/tailwind-animations";
 @custom-variant dark (&:is(.dark *));
 

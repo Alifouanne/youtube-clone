@@ -5,6 +5,9 @@ import { ThemeProvider } from "@/modules/home/ui/components/theme/theme-provider
 import { ClerkProvider } from "@clerk/nextjs";
 import { TRPCProvider } from "@/trpc/client";
 import { Toaster } from "@/components/ui/sonner";
+import { NextSSRPlugin } from "@uploadthing/react/next-ssr-plugin";
+import { extractRouterConfig } from "uploadthing/server";
+import { ourFileRouter } from "@/app/api/uploadthing/core";
 const poppins = Poppins({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -70,6 +73,9 @@ export default function RootLayout({
           >
             <TRPCProvider>
               <Toaster />
+              <NextSSRPlugin
+                routerConfig={extractRouterConfig(ourFileRouter)}
+              />
               {children}
             </TRPCProvider>
           </ThemeProvider>
