@@ -21,6 +21,7 @@ const ThumbnailUploadModal = ({
     utils.studio.getMany.invalidate();
     toast.success('"Thumbnail Updated successfully!"');
   };
+
   return (
     <UploadDialog
       open={open}

@@ -8,7 +8,7 @@ import { usersTable, videoTable } from "@/database/schema";
 import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 import { createUploadthing, type FileRouter } from "uploadthing/next";
-import { UploadThingError } from "uploadthing/server";
+import { UploadThingError, UTApi } from "uploadthing/server";
 import z from "zod";
 
 // Initialize the UploadThing factory for route creation
@@ -63,6 +63,29 @@ export const ourFileRouter = {
     })
     // Handler that runs after a successful upload
     .onUploadComplete(async ({ metadata, file }) => {
+      // handle cleanup files
+      //fetch the old file
+      const [video] = await db
+        .select()
+        .from(videoTable)
+        .where(
+          and(
+            eq(videoTable.id, metadata.videoId),
+            eq(videoTable.uploaderId, metadata.user.id)
+          )
+        );
+      //if the old one exist then deleted
+      if (video.thumbnailKey) {
+        console.log(`🧹 Replacing thumbnail for video ${metadata.videoId}`);
+        const utapi = new UTApi();
+        try {
+          await utapi.deleteFiles(video.thumbnailKey);
+
+          console.log("Deleted uploadthing files", video.thumbnailKey);
+        } catch {
+          throw new UploadThingError("❌ Failed to delete UploadThing files:");
+        }
+      }
       /**
        * This handler updates the specified video's thumbnailUrl in the database,
        * ensuring only the video's uploader can update that video.
@@ -71,6 +94,7 @@ export const ourFileRouter = {
         .update(videoTable)
         .set({
           thumbnailUrl: file.ufsUrl,
+          thumbnailKey: file.key,
         })
         .where(
           and(

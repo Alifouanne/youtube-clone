@@ -60,6 +60,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 import ThumbnailUploadModal from "../components/ThumbnailUploadModal";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 interface FormSectionProps {
   videoId: string;
 }
@@ -85,6 +91,7 @@ const FormSection = ({ videoId }: FormSectionProps) => {
 
 const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
   const [thumbnailModalOpen, setThumbnailModalOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const router = useRouter();
   const utils = trpc.useUtils();
   const [video] = trpc.studio.getOne.useSuspenseQuery({ id: videoId });
@@ -103,10 +110,15 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
     onSuccess: () => {
       utils.studio.getMany.invalidate();
       toast.success("You video removed ");
+      setOpen(false);
       router.push("/studio");
     },
     onError: () => {
       toast.error("Something went wrong");
+      setOpen(false);
+    },
+    onMutate: () => {
+      setOpen(true);
     },
   });
   const form = useForm<z.infer<typeof videoUpdateSchema>>({
@@ -128,6 +140,16 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
       setIsCopied(false);
     }, 2000);
   };
+  const restoreThumbnail = trpc.videos.restoreThumbnail.useMutation({
+    onSuccess: () => {
+      utils.studio.getMany.invalidate();
+      utils.studio.getOne.invalidate({ id: videoId });
+      toast.success("Video thumbnail restored");
+    },
+    onError: () => {
+      toast.error("Something went wrong !");
+    },
+  });
   return (
     <>
       <ThumbnailUploadModal
@@ -135,6 +157,24 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
         onOpenChange={setThumbnailModalOpen}
         videoId={videoId}
       />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex flex-col items-center justify-center gap-6 border-none bg-background shadow-lg sm:max-w-md">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="relative flex size-16 items-center justify-center rounded-full bg-destructive/10">
+              <Spinner className="size-8 text-destructive" />
+            </div>
+
+            <div className="space-y-2">
+              <DialogTitle className="text-xl font-semibold">
+                Deleting Video
+              </DialogTitle>
+              <DialogDescription className="text-balance text-base text-muted-foreground">
+                Please wait while we remove your video. This may take a moment.
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <form onSubmit={form.handleSubmit(onSubmit)} id="form-video">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -293,7 +333,11 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                             <SparkleIcon className="size-4 mr-1" />
                             AI-Generated
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              restoreThumbnail.mutate({ videoId: videoId })
+                            }
+                          >
                             <RotateCcw className="size-4 mr-1" />
                             Restore
                           </DropdownMenuItem>
