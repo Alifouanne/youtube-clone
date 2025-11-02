@@ -36,6 +36,7 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
   InputGroupText,
   InputGroupTextarea,
@@ -150,6 +151,36 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
       toast.error("Something went wrong !");
     },
   });
+  const generateTitle = trpc.videos.generateTitle.useMutation({
+    onSuccess: () => {
+      toast.success("background task started", {
+        description: "You will be notified when the task is complete",
+      });
+    },
+    onError: () => {
+      toast.error("Something went wrong !");
+    },
+  });
+  const generateDescription = trpc.videos.generateDescription.useMutation({
+    onSuccess: () => {
+      toast.success("background task started", {
+        description: "You will be notified when the task is complete",
+      });
+    },
+    onError: () => {
+      toast.error("Something went wrong !");
+    },
+  });
+  const generateThumbnail = trpc.videos.generateThumbnail.useMutation({
+    onSuccess: () => {
+      toast.success("background task started", {
+        description: "You will be notified when the task is complete",
+      });
+    },
+    onError: () => {
+      toast.error("Something went wrong !");
+    },
+  });
   return (
     <>
       <ThumbnailUploadModal
@@ -236,6 +267,25 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                       <InputGroupAddon align="inline-start">
                         <Captions className="h-4 w-4 text-muted-foreground" />
                       </InputGroupAddon>
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupButton
+                          aria-label="Title Generate AI"
+                          title="Title Generate AI"
+                          size="icon-xs"
+                          onClick={() =>
+                            generateTitle.mutate({ videoId: videoId })
+                          }
+                          disabled={
+                            generateTitle.isPending || !video.muxTrackId
+                          }
+                        >
+                          {generateTitle.isPending ? (
+                            <Spinner />
+                          ) : (
+                            <SparkleIcon />
+                          )}
+                        </InputGroupButton>
+                      </InputGroupAddon>
                     </InputGroup>
                     <FieldDescription className="text-sm">
                       Create a clear, engaging title that accurately describes
@@ -257,7 +307,6 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                       className="text-base font-semibold"
                     >
                       Description
-                      {/* add AI button  */}
                     </FieldLabel>
 
                     <InputGroup>
@@ -272,6 +321,26 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                       />
                       <InputGroupAddon align="block-start">
                         <NotebookText className="h-4 w-4 text-muted-foreground" />
+                      </InputGroupAddon>
+
+                      <InputGroupAddon align="block-end">
+                        <InputGroupButton
+                          aria-label="Description Generate AI"
+                          title="Description Generate AI"
+                          size="icon-xs"
+                          onClick={() =>
+                            generateDescription.mutate({ videoId: videoId })
+                          }
+                          disabled={
+                            generateDescription.isPending || !video.muxTrackId
+                          }
+                        >
+                          {generateDescription.isPending ? (
+                            <Spinner />
+                          ) : (
+                            <SparkleIcon />
+                          )}
+                        </InputGroupButton>
                       </InputGroupAddon>
                       <InputGroupAddon align="block-end">
                         <InputGroupText className="tabular-nums text-xs">
@@ -329,7 +398,11 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                             <ImagePlusIcon className="size-4 mr-1" />
                             Change
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              generateThumbnail.mutate({ videoId: videoId })
+                            }
+                          >
                             <SparkleIcon className="size-4 mr-1" />
                             AI-Generated
                           </DropdownMenuItem>

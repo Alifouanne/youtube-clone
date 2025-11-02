@@ -2,6 +2,7 @@
 import { db } from "@/database"; // Database instance
 import { videoTable, videoUpdateSchema } from "@/database/schema"; // Video table and update schema from DB
 import { mux } from "@/lib/mux"; // Mux API instance for video operations
+import { workflow } from "@/lib/workflow";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init"; // Helpers to define tRPC routers/procedures
 import { TRPCError } from "@trpc/server"; // tRPC error handling
 import { and, eq } from "drizzle-orm"; // SQL query helpers
@@ -14,6 +15,45 @@ import z from "zod"; // Validation library
  * updating details, and initiating uploads for authenticated users.
  */
 export const videoRouter = createTRPCRouter({
+  generateTitle: protectedProcedure
+    .input(z.object({ videoId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const BASE_URL = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : `${process.env.UPSTASH_WORKFLOW_URL}`;
+      const { id: userId } = ctx.user;
+      const { videoId } = input;
+      const { workflowRunId } = await workflow.trigger({
+        url: `${BASE_URL}/api/videos/workflows/title`,
+        body: { userId, videoId },
+      });
+    }),
+  generateDescription: protectedProcedure
+    .input(z.object({ videoId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const BASE_URL = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : `${process.env.UPSTASH_WORKFLOW_URL}`;
+      const { id: userId } = ctx.user;
+      const { videoId } = input;
+      const { workflowRunId } = await workflow.trigger({
+        url: `${BASE_URL}/api/videos/workflows/description`,
+        body: { userId, videoId },
+      });
+    }),
+  generateThumbnail: protectedProcedure
+    .input(z.object({ videoId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const BASE_URL = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : `${process.env.UPSTASH_WORKFLOW_URL}`;
+      const { id: userId } = ctx.user;
+      const { videoId } = input;
+      const { workflowRunId } = await workflow.trigger({
+        url: `${BASE_URL}/api/videos/workflows/thumbnail`,
+        body: { userId, videoId },
+      });
+    }),
   /**
    * Endpoint: restoreThumbnail
    * Restores original thumbnail from Mux for an owned video.
