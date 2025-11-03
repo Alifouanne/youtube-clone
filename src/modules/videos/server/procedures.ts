@@ -1,33 +1,68 @@
-// --- Import required dependencies for the video router functionality ---
-import { db } from "@/database"; // Database instance
-import { videoTable, videoUpdateSchema } from "@/database/schema"; // Video table and update schema from DB
-import { mux } from "@/lib/mux"; // Mux API instance for video operations
+// --------------------------- IMPORTS AND DEPENDENCIES ---------------------------
+// Import database instance and schema/table definitions for videos
+import { db } from "@/database";
+import { videoTable, videoUpdateSchema } from "@/database/schema";
+
+// Import Mux client for video asset management (uploads/processing/deletions)
+import { mux } from "@/lib/mux";
+
+// Import workflow utility for triggering Upstash/AI workflows (background jobs)
 import { workflow } from "@/lib/workflow";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init"; // Helpers to define tRPC routers/procedures
-import { TRPCError } from "@trpc/server"; // tRPC error handling
-import { and, eq } from "drizzle-orm"; // SQL query helpers
-import { UTApi } from "uploadthing/server"; // UploadThing API for storage management
-import z from "zod"; // Validation library
+
+// Import tRPC helpers to define restricted (authenticated) endpoints and routers
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+
+// tRPC error-handling construct for clear error signaling to consumers
+import { TRPCError } from "@trpc/server";
+
+// Import Drizzle ORM helpers for query composition
+import { and, eq } from "drizzle-orm";
+
+// Import UploadThing API for managing uploads/removals of thumbnail and preview files
+import { UTApi } from "uploadthing/server";
+
+// Import Zod validation for input schemas
+import z from "zod";
+
+// --------------------------- tRPC VIDEO ROUTER DEFINITION ---------------------------
 
 /**
- * videoRouter: tRPC router providing endpoints to manage videos.
- * Exposes secured endpoints for restoring thumbnails, removing videos,
- * updating details, and initiating uploads for authenticated users.
+ * The videoRouter exposes all mutations for managing user videos.
+ * Endpoints are protected to allow only authenticated actions on owned resources.
+ * Responsibilities include:
+ *   - AI-powered title/description/thumbnail generation
+ *   - Thumbnail restoration/management
+ *   - Full video removal (DB + assets)
+ *   - Video detail updates (title, metadata, visibility)
+ *   - Creation of new uploads with Mux/session bootstrap
  */
 export const videoRouter = createTRPCRouter({
+  /**
+   * Trigger a background workflow to generate a suggested title for a video.
+   * Only the authenticated owner can request this.
+   * The actual title update is left to the user to accept/apply.
+   */
   generateTitle: protectedProcedure
     .input(z.object({ videoId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
+      // Base URL for workflow depending on deployment environment
       const BASE_URL = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
         : `${process.env.UPSTASH_WORKFLOW_URL}`;
       const { id: userId } = ctx.user;
       const { videoId } = input;
-      const { workflowRunId } = await workflow.trigger({
+
+      // Trigger the AI workflow endpoint to suggest a title for this video
+      await workflow.trigger({
         url: `${BASE_URL}/api/videos/workflows/title`,
         body: { userId, videoId },
       });
     }),
+
+  /**
+   * Initiate background AI workflow for generating a suggested description
+   * for a given video, provided as a mutation for the owning user.
+   */
   generateDescription: protectedProcedure
     .input(z.object({ videoId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -36,45 +71,54 @@ export const videoRouter = createTRPCRouter({
         : `${process.env.UPSTASH_WORKFLOW_URL}`;
       const { id: userId } = ctx.user;
       const { videoId } = input;
-      const { workflowRunId } = await workflow.trigger({
+
+      // Trigger the workflow that prompts AI to generate this video's description
+      await workflow.trigger({
         url: `${BASE_URL}/api/videos/workflows/description`,
         body: { userId, videoId },
       });
     }),
+
+  /**
+   * Request an AI-generated thumbnail for a video, given a user-provided prompt.
+   * Enforces a minimum prompt length for better quality outcomes.
+   */
   generateThumbnail: protectedProcedure
-    .input(z.object({ videoId: z.uuid() }))
+    .input(z.object({ videoId: z.uuid(), prompt: z.string().min(10) }))
     .mutation(async ({ ctx, input }) => {
       const BASE_URL = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
         : `${process.env.UPSTASH_WORKFLOW_URL}`;
       const { id: userId } = ctx.user;
-      const { videoId } = input;
-      const { workflowRunId } = await workflow.trigger({
+      const { videoId, prompt } = input;
+
+      // Start workflow that generates and updates the thumbnail asset via AI/image
+      await workflow.trigger({
         url: `${BASE_URL}/api/videos/workflows/thumbnail`,
-        body: { userId, videoId },
+        body: { userId, videoId, prompt },
       });
     }),
+
   /**
-   * Endpoint: restoreThumbnail
-   * Restores original thumbnail from Mux for an owned video.
-   * Cleans up any custom thumbnail from UploadThing first.
+   * Restore a video's thumbnail to its original Mux asset preview.
+   * This will remove a custom AI/uploaded thumbnail (if it exists) and
+   * then download/rehash the public Mux thumbnail via UploadThing.
+   * Only allows action by the current (authenticated) video owner.
    */
   restoreThumbnail: protectedProcedure
-    .input(z.object({ videoId: z.uuid() })) // Validate input
+    .input(z.object({ videoId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const { id: userId } = ctx.user;
       const { videoId } = input;
       const utapi = new UTApi();
 
-      // Fetch video by id which belongs to the current user
+      // Retrieve the user's video; fail if missing or unauthorized
       const [video] = await db
         .select()
         .from(videoTable)
         .where(
           and(eq(videoTable.id, videoId), eq(videoTable.uploaderId, userId))
         );
-
-      // If video not found or not owned, throw an error
       if (!video) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -82,18 +126,18 @@ export const videoRouter = createTRPCRouter({
         });
       }
 
-      // Remove any custom thumbnail from UploadThing, if it exists
+      // If there was a custom thumbnail, attempt to delete from UploadThing (no-fail)
       if (video.thumbnailKey) {
         try {
           await utapi.deleteFiles(video.thumbnailKey);
           console.log("🧹 Deleted old custom thumbnail:", video.thumbnailKey);
         } catch (error) {
-          // Continue on errors; log for debugging
+          // Log and proceed even if deletion failed
           console.error("❌ Failed to delete UploadThing file:", error);
         }
       }
 
-      // Require a muxPlaybackId to restore thumbnail from Mux
+      // Video must have a muxPlaybackId in order to restore the Mux thumbnail preview
       if (!video.muxPlaybackId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -101,27 +145,23 @@ export const videoRouter = createTRPCRouter({
         });
       }
 
-      // Build the thumbnail URL using Mux playback ID
+      // Construct the public thumbnail URL at Mux for this asset
       const tempThumbnailUrl = `https://image.mux.com/${video.muxPlaybackId}/thumbnail.jpg`;
 
-      // Upload the Mux thumbnail to UploadThing to obtain new storage details
+      // Upload the Mux thumbnail via URL into UploadThing storage
       const uploadedThumbnail = await utapi.uploadFilesFromUrl(
         tempThumbnailUrl
       );
-
-      // If upload fails, abort and respond with error
       if (!uploadedThumbnail.data) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "unable to upload file to uploadthing",
         });
       }
-
-      // Extract storage key and direct URL for new thumbnail
       const { key: thumbnailKey, ufsUrl: thumbnailUrl } =
         uploadedThumbnail.data;
 
-      // Update video record's thumbnail metadata in the DB
+      // Update this video's record to point to the new hosted thumbnail/image
       const [updatedVideo] = await db
         .update(videoTable)
         .set({
@@ -133,30 +173,31 @@ export const videoRouter = createTRPCRouter({
         )
         .returning();
 
-      // Return updated video information
+      // Return the updated row (could be consumed for UI refresh)
       return updatedVideo;
     }),
 
   /**
-   * Endpoint: remove
-   * Deletes a video owned by the authenticated user along with relevant assets.
+   * Remove a video and its assets. This endpoint deletes:
+   *   - the video record for this user
+   *   - attached custom/AI thumbnails and preview files from storage
+   *   - the original asset from Mux (if available)
+   * All deletions are partial-fault-tolerant: logs, but doesn't block on error.
    */
   remove: protectedProcedure
-    .input(z.object({ id: z.uuid() })) // Validate UUID input for video ID
+    .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const { id: userId } = ctx.user;
       const { id: videoId } = input;
       const utapi = new UTApi();
 
-      // Retrieve the targeted video belonging to the user
+      // Fetch/validate user ownership of the video to be deleted
       const [existVideo] = await db
         .select()
         .from(videoTable)
         .where(
           and(eq(videoTable.id, videoId), eq(videoTable.uploaderId, userId))
         );
-
-      // If video is not found, throw NOT_FOUND error
       if (!existVideo) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -164,34 +205,32 @@ export const videoRouter = createTRPCRouter({
         });
       }
 
-      // Gather all associated asset keys to delete from UploadThing
+      // Remove custom/AI thumbnail and preview files if present
       const filesToDelete = [];
       if (existVideo.thumbnailKey) filesToDelete.push(existVideo.thumbnailKey);
       if (existVideo.previewKey) filesToDelete.push(existVideo.previewKey);
 
-      // Attempt to delete associated thumbnails and previews from UploadThing
+      // Delete all associated files from UploadThing (do not block if fails)
       if (filesToDelete.length > 0) {
         try {
           await utapi.deleteFiles(filesToDelete);
           console.log("🧹 Deleted UploadThing assets:", filesToDelete);
         } catch (error) {
-          // Log any deletion failure, but continue process
           console.error("❌ Failed to delete UploadThing assets:", error);
         }
       }
 
-      // Attempt to delete the asset from Mux, if present
+      // Remove the main video asset from Mux (if available)
       if (existVideo.muxAssetId) {
         try {
           await mux.video.assets.delete(existVideo.muxAssetId);
           console.log("🗑️ Deleted Mux asset:", existVideo.muxAssetId);
         } catch (error) {
-          // Log Mux deletion failures for debugging
           console.error("❌ Failed to delete Mux asset:", error);
         }
       }
 
-      // Remove the video record from the DB
+      // Actually remove the video DB entry for this user's record
       const [removedVideo] = await db
         .delete(videoTable)
         .where(
@@ -199,26 +238,22 @@ export const videoRouter = createTRPCRouter({
         )
         .returning();
 
-      // If the DB deletion did not actually remove a row, error
       if (!removedVideo) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Video deletion failed — record not found",
         });
       }
-      // Return the deleted video row
       return removedVideo;
     }),
 
   /**
-   * Endpoint: update
-   * Updates details for a user's video (title, description, etc).
-   * Only allowed for the authenticated owner of the video.
+   * Update main video details for an existing video, restricting to the current owner.
+   * Updates allowed: title, description, category, and visibility.
    */
   update: protectedProcedure
-    .input(videoUpdateSchema) // Validate update shape using zod schema
+    .input(videoUpdateSchema)
     .mutation(async ({ ctx, input }) => {
-      // Enforce that the video ID is provided in update payload
       const { id: userId } = ctx.user;
       if (!input.id) {
         throw new TRPCError({
@@ -227,7 +262,7 @@ export const videoRouter = createTRPCRouter({
         });
       }
 
-      // Update designated fields for the video in DB, restrict by ownership
+      // Perform update of provided fields; update timestamp automatically
       const [updatedVideo] = await db
         .update(videoTable)
         .set({
@@ -235,14 +270,13 @@ export const videoRouter = createTRPCRouter({
           description: input.description,
           categoryId: input.categoryId,
           visibility: input.visibility,
-          updatedAt: new Date(), // Mark update time
+          updatedAt: new Date(),
         })
         .where(
           and(eq(videoTable.id, input.id), eq(videoTable.uploaderId, userId))
         )
         .returning();
 
-      // If no video was actually updated, signal not found
       if (!updatedVideo) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -250,57 +284,54 @@ export const videoRouter = createTRPCRouter({
         });
       }
 
-      // Return updated video row
       return updatedVideo;
     }),
 
   /**
-   * Endpoint: create
-   * Starts a new upload session with Mux (generating a secure upload URL)
-   * and creates a corresponding placeholder video row in the DB.
-   * Only available to authenticated users.
+   * Create a new video record and generate a secure Mux upload URL for direct upload.
+   * Allows returning of the video DB row plus the upload URL to the client.
+   * Asset is minimally titled and flagged as 'waiting' until upload completes.
    */
   create: protectedProcedure.mutation(async ({ ctx }) => {
-    // Get user ID for passthrough field and DB ownership
     const { id: userId } = ctx.user;
 
-    // Request a new upload slot from Mux with asset and subtitle settings
+    // Request an upload session from Mux, configure for streaming and subtitles
     const upload = await mux.video.uploads.create({
       new_asset_settings: {
-        passthrough: userId, // Used for webhook linkage
-        playback_policies: ["public"], // Allow public playback
+        passthrough: userId, // Useful for associating Mux events/webhooks
+        playback_policies: ["public"],
         static_renditions: [
-          { resolution: "1080p" }, // Full HD
-          { resolution: "audio-only" }, // Audio-only track
-          { resolution: "480p" }, // SD quality
-          { resolution: "720p" }, // HD quality
+          { resolution: "1080p" },
+          { resolution: "audio-only" },
+          { resolution: "480p" },
+          { resolution: "720p" },
         ],
         inputs: [
           {
             generated_subtitles: [
               {
                 language_code: "en",
-                name: "English Auto-Generated", // Enable English auto-subtitles
+                name: "English Auto-Generated",
               },
             ],
           },
         ],
       },
-      cors_origin: "*", // Allow upload from any origin
+      cors_origin: "*", // Allow all client origins for in-browser upload
     });
 
-    // Insert a new row with minimal placeholder data, referencing upload ID
+    // Insert initial DB row for the new video; user will later update with desired metadata
     const [video] = await db
       .insert(videoTable)
       .values({
         uploaderId: userId,
-        title: "Untitled", // Temp title; to be updated by user
-        muxStatus: "waiting", // Indicates pending/uploading state
-        muxUploadId: upload.id, // Store Mux upload ID for tracking
+        title: "Untitled", // Placeholder until the user supplies metadata
+        muxStatus: "waiting", // Indicates asset is not yet processed/available
+        muxUploadId: upload.id,
       })
       .returning();
 
-    // Return both the database entry and the secure upload URL
+    // Send both the DB video record and the newly-allocated Mux upload URL
     return { video: video, url: upload.url };
   }),
 });

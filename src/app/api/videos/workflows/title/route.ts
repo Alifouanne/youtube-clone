@@ -1,17 +1,22 @@
+// Import required modules and utilities for database access, AI, and API routing
 import { db } from "@/database";
 import { videoTable } from "@/database/schema";
-import { groq } from "@/lib/groq";
+import { ai } from "@/lib/gemini";
 import { serve } from "@upstash/workflow/nextjs";
 import { and, eq } from "drizzle-orm";
 
+// Define the expected shape of the request payload for this endpoint
 interface Input {
   userId: string;
   videoId: string;
 }
 
+// Export a POST handler via Upstash Workflows to generate an AI-powered video title
 export const { POST } = serve(async (context) => {
+  // Extract the user and video IDs from the request payload
   const { userId, videoId } = context.requestPayload as Input;
 
+  // Step 1: Fetch the video belonging to the user from the database
   const video = await context.run("get-video", async () => {
     const [existVideo] = await db
       .select()
@@ -24,6 +29,8 @@ export const { POST } = serve(async (context) => {
     }
     return existVideo;
   });
+
+  // Step 2: Retrieve the video's transcript from the Mux server using playback and track IDs
   const transcript = await context.run("get-transcript", async () => {
     const trackUrl = ` https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxTrackId}.txt`;
     const response = await fetch(trackUrl);
@@ -33,7 +40,10 @@ export const { POST } = serve(async (context) => {
     }
     return text;
   });
+
+  // Step 3: Use Gemini AI to generate a SEO-friendly YouTube title given the transcript
   const generatedTitle = await context.run("generate-ai-title", async () => {
+    // The AI instruction prompt, providing the requirements and format for the generated title
     const SystemPrompt = `Your task is to generate an SE0-focused title for a YouTube video based on its transcript. Please follow these guidelines:
 - Be concise but descriptive, using relevant keywords to improve discoverability.
 - Highlight the most compelling or unique aspect of the video content.
@@ -42,28 +52,30 @@ export const { POST } = serve(async (context) => {
 - Ensure the title is 3-8 words long and no more than 100 characters.
 - ONLY return the title as plain text. Do not add quotes or any additional formatting. `;
 
-    const completion = await groq.chat.completions.create({
-      model: "openai/gpt-oss-20b",
-      messages: [
+    // Ask the Gemini model for a title, using the provided transcript and system prompt
+    const completion = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
         {
-          role: "system",
-          content: SystemPrompt,
+          role: "model",
+          parts: [{ text: SystemPrompt }],
         },
         {
           role: "user",
-          content: transcript,
+          parts: [{ text: transcript }],
         },
       ],
-      temperature: 0.8,
-      max_completion_tokens: 200,
+      config: {
+        temperature: 0.8,
+      },
     });
-    const content =
-      completion.choices[0].message.content ||
-      "Hit the limit today , try later.";
+    // Use the AI-generated title, or a fallback if generation failed/limit reached
+    const content = completion.text || "Hit the limit today , try later.";
 
     return { content };
   });
 
+  // Step 4: Update the video's title in the database with the newly generated title
   await context.run("update-video", async () => {
     await db
       .update(videoTable)

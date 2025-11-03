@@ -1,17 +1,22 @@
+// Import necessary dependencies for database access, AI integration, and API serving
 import { db } from "@/database";
 import { videoTable } from "@/database/schema";
-import { groq } from "@/lib/groq";
+import { ai } from "@/lib/gemini";
 import { serve } from "@upstash/workflow/nextjs";
 import { and, eq } from "drizzle-orm";
 
+// Define the expected structure for incoming request payload
 interface Input {
   userId: string;
   videoId: string;
 }
 
+// Export the POST endpoint handler for video description generation using Upstash's workflow
 export const { POST } = serve(async (context) => {
+  // Extract userId and videoId from the API request payload
   const { userId, videoId } = context.requestPayload as Input;
 
+  // Step 1: Retrieve the target video owned by the requesting user
   const video = await context.run("get-video", async () => {
     const [existVideo] = await db
       .select()
@@ -24,8 +29,12 @@ export const { POST } = serve(async (context) => {
     }
     return existVideo;
   });
+
+  // Step 2: Fetch the transcript file from Mux using the video's playback and track IDs
   const transcript = await context.run("get-transcript", async () => {
+    // Construct the transcript URL
     const trackUrl = ` https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxTrackId}.txt`;
+    // Fetch the transcript text
     const response = await fetch(trackUrl);
     const text = await response.text();
     if (!text) {
@@ -33,9 +42,12 @@ export const { POST } = serve(async (context) => {
     }
     return text;
   });
+
+  // Step 3: Generate a summarized description using AI (Gemini)
   const generatedDescription = await context.run(
     "generate-ai-description",
     async () => {
+      // Compose the system prompt with summarization instructions
       const SystemPrompt = ` Your task is to summarize the transcript of a video. Please
 follow these guidelines:
 - Be brief. Condense the content into a summary that captures the key points and main ideas without
@@ -46,29 +58,32 @@ tangents.
 - ONLY return the summary, no other text, annotations, or comments.
 - Aim for a summary that is 3-5 sentences long and no more than 200 characters. `;
 
-      const completion = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
-        messages: [
+      // Call the Gemini AI model with the prompt and transcript
+      const completion = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
           {
-            role: "system",
-            content: SystemPrompt,
+            role: "model",
+            parts: [{ text: SystemPrompt }],
           },
           {
             role: "user",
-            content: transcript,
+            parts: [{ text: transcript }],
           },
         ],
-        temperature: 0.8,
-        max_completion_tokens: 300,
+        config: {
+          temperature: 0.8,
+        },
       });
-      const content =
-        completion.choices[0].message.content ||
-        "Hit the limit today , try later.";
+      // Use the returned text, or fallback if quota is reached
+      const content = completion.text || "Hit the limit today , try later.";
 
+      // Return object with the generated content
       return { content };
     }
   );
 
+  // Step 4: Update the video's description field in the database with the generated summary
   await context.run("update-video", async () => {
     await db
       .update(videoTable)
