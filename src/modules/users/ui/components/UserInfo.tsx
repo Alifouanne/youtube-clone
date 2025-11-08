@@ -1,5 +1,6 @@
 "use client";
 
+// Import required UI components and utilities
 import {
   Tooltip,
   TooltipContent,
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { cva, type VariantProps } from "class-variance-authority";
 import { BadgeCheck } from "lucide-react";
 
+// Style variants for the main UserInfo container
 const userInfoVariants = cva("flex items-center gap-2", {
   variants: {
     size: {
@@ -24,6 +26,7 @@ const userInfoVariants = cva("flex items-center gap-2", {
   },
 });
 
+// Style variants for the user's avatar
 const avatarVariants = cva("shrink-0", {
   variants: {
     size: {
@@ -37,6 +40,7 @@ const avatarVariants = cva("shrink-0", {
   },
 });
 
+// Style variants for the text section (name and subtitle)
 const textVariants = cva("flex flex-col min-w-0", {
   variants: {
     size: {
@@ -50,6 +54,7 @@ const textVariants = cva("flex flex-col min-w-0", {
   },
 });
 
+// Style variants for displaying the user's name and (optionally) verified badge
 const nameVariants = cva(
   "font-medium text-foreground line-clamp-1 flex items-center gap-1",
   {
@@ -66,6 +71,7 @@ const nameVariants = cva(
   }
 );
 
+// Style variants for the subtitle (e.g. a user's email or summary)
 const subtitleVariants = cva("text-muted-foreground line-clamp-1", {
   variants: {
     size: {
@@ -79,6 +85,7 @@ const subtitleVariants = cva("text-muted-foreground line-clamp-1", {
   },
 });
 
+// Style variants for the verified badge icon
 const badgeVariants = cva("shrink-0 text-primary", {
   variants: {
     size: {
@@ -92,17 +99,19 @@ const badgeVariants = cva("shrink-0 text-primary", {
   },
 });
 
+// Props for the UserInfo component, including interface for style variants
 interface UserInfoProps extends VariantProps<typeof userInfoVariants> {
-  name: string;
-  subtitle?: string;
-  avatarUrl?: string;
-  avatarFallback?: string;
-  verified?: boolean;
-  showTooltip?: boolean;
-  className?: string;
-  onClick?: () => void;
+  name: string; // User's display name
+  subtitle?: string; // Optional subtitle text
+  avatarUrl?: string; // Optional avatar image URL
+  avatarFallback?: string; // If no avatar, fallback string (e.g. an initial)
+  verified?: boolean; // Show a verified badge if true
+  showTooltip?: boolean; // Show tooltip on hover
+  className?: string; // Additional custom classNames
+  onClick?: () => void; // Optional click handler
 }
 
+// UserInfo component displays user's avatar and name, supports optional tooltip and badge
 const UserInfo = ({
   name,
   subtitle,
@@ -114,15 +123,17 @@ const UserInfo = ({
   size,
   onClick,
 }: UserInfoProps) => {
+  // Main content to be rendered (used inside and outside tooltip)
   const content = (
     <div
+      // Merge style variant and custom classNames, apply pointer cursor/hover effect if clickable
       className={cn(
         userInfoVariants({ size, className }),
         onClick && "cursor-pointer transition-opacity hover:opacity-80"
       )}
       onClick={onClick}
     >
-      {/* Avatar */}
+      {/* User avatar section */}
       {(avatarUrl || avatarFallback) && (
         <Avatar className={avatarVariants({ size })}>
           <AvatarImage src={avatarUrl || "/placeholder.svg"} alt={name} />
@@ -132,10 +143,12 @@ const UserInfo = ({
         </Avatar>
       )}
 
-      {/* Text content */}
+      {/* User name and (optionally) subtitle */}
       <div className={textVariants({ size })}>
         <div className={nameVariants({ size })}>
+          {/* Truncated username */}
           <span className="truncate">{name}</span>
+          {/* Verified badge, if enabled */}
           {verified && (
             <BadgeCheck
               className={badgeVariants({ size })}
@@ -143,15 +156,18 @@ const UserInfo = ({
             />
           )}
         </div>
+        {/* Optional subtitle below the name */}
         {subtitle && <p className={subtitleVariants({ size })}>{subtitle}</p>}
       </div>
     </div>
   );
 
+  // If tooltips are disabled, just return the content directly
   if (!showTooltip) {
     return content;
   }
 
+  // Tooltip appears on hover/focus; shows name & subtitle
   return (
     <TooltipProvider>
       <Tooltip>

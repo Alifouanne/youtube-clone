@@ -1,7 +1,13 @@
 // --------------------------- IMPORTS AND DEPENDENCIES ---------------------------
 // Import database instance and schema/table definitions for videos
 import { db } from "@/database";
-import { usersTable, videoTable, videoUpdateSchema } from "@/database/schema";
+import {
+  usersTable,
+  videoReactionTable,
+  videoTable,
+  videoUpdateSchema,
+  videoViewsTable,
+} from "@/database/schema";
 
 // Import Mux client for video asset management (uploads/processing/deletions)
 import { mux } from "@/lib/mux";
@@ -20,7 +26,7 @@ import {
 import { TRPCError } from "@trpc/server";
 
 // Import Drizzle ORM helpers for query composition
-import { and, eq, getTableColumns } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray } from "drizzle-orm";
 
 // Import UploadThing API for managing uploads/removals of thumbnail and preview files
 import { UTApi } from "uploadthing/server";
@@ -41,25 +47,248 @@ import z from "zod";
  *   - Creation of new uploads with Mux/session bootstrap
  */
 export const videoRouter = createTRPCRouter({
-  getOne: baseProcedure
+  /**
+   * like - Protected mutation to "like" a video for the current user.
+   * - If a "like" reaction already exists for this video/user, it is removed (toggle behavior).
+   * - If no like exists, either create a new like or switch a previous "dislike" to a "like".
+   *
+   * Input: { videoId: uuid }
+   * Returns: The inserted or deleted video reaction row.
+   */
+  like: protectedProcedure
     .input(z.object({ videoId: z.uuid() }))
-    .query(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const { videoId } = input;
+      const userId = ctx.user.id;
+
+      // Check for an existing LIKE reaction for this user/video pair
+      const [existingVideoReactionLike] = await db
+        .select()
+        .from(videoReactionTable)
+        .where(
+          and(
+            eq(videoReactionTable.videoId, videoId),
+            eq(videoReactionTable.userId, userId),
+            eq(videoReactionTable.type, "like")
+          )
+        );
+
+      if (existingVideoReactionLike) {
+        // If a LIKE exists, remove the reaction (toggle off)
+        const [deletedViewerReaction] = await db
+          .delete(videoReactionTable)
+          .where(
+            and(
+              eq(videoReactionTable.userId, userId),
+              eq(videoReactionTable.videoId, videoId)
+            )
+          )
+          .returning();
+        return deletedViewerReaction;
+      }
+
+      // Insert a new LIKE reaction (or update a previous DISLIKE to LIKE)
+      const [createdVideoReaction] = await db
+        .insert(videoReactionTable)
+        .values({ userId, videoId, type: "like" })
+        .onConflictDoUpdate({
+          // If a reaction already exists (either like/dislike), just update the type to "like"
+          target: [videoReactionTable.videoId, videoReactionTable.userId],
+          set: { type: "like" },
+        })
+        .returning();
+      return createdVideoReaction;
+    }),
+
+  /**
+   * dislike - Protected mutation to "dislike" a video for the current user.
+   * - If a "dislike" reaction already exists for this video/user, it is removed (toggle behavior).
+   * - If no dislike exists, either create a new dislike or switch a previous "like" to a "dislike".
+   *
+   * Input: { videoId: uuid }
+   * Returns: The inserted or deleted video reaction row.
+   */
+  dislike: protectedProcedure
+    .input(z.object({ videoId: z.uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const { videoId } = input;
+      const userId = ctx.user.id;
+
+      // Check for an existing DISLIKE reaction for this user/video pair
+      const [existingVideoReactionDislike] = await db
+        .select()
+        .from(videoReactionTable)
+        .where(
+          and(
+            eq(videoReactionTable.videoId, videoId),
+            eq(videoReactionTable.userId, userId),
+            eq(videoReactionTable.type, "dislike")
+          )
+        );
+
+      if (existingVideoReactionDislike) {
+        // If a DISLIKE exists, remove the reaction (toggle off)
+        const [deletedViewerReaction] = await db
+          .delete(videoReactionTable)
+          .where(
+            and(
+              eq(videoReactionTable.userId, userId),
+              eq(videoReactionTable.videoId, videoId)
+            )
+          )
+          .returning();
+        return deletedViewerReaction;
+      }
+
+      // Insert a new DISLIKE reaction (or update a previous LIKE to DISLIKE)
+      const [createdVideoReaction] = await db
+        .insert(videoReactionTable)
+        .values({ userId, videoId, type: "dislike" })
+        .onConflictDoUpdate({
+          // If a reaction already exists (either like/dislike), just update the type to "dislike"
+          target: [videoReactionTable.videoId, videoReactionTable.userId],
+          set: { type: "dislike" },
+        })
+        .returning();
+      return createdVideoReaction;
+    }),
+  /**
+   * Record a view for a video by the currently authenticated user.
+   * If the user has already viewed this video (i.e., a view exists for this video/user pair),
+   * simply return the existing view. Otherwise, create a new view record.
+   */
+  createView: protectedProcedure
+    // Accepts an input object with a videoId (of type ulid).
+    .input(z.object({ videoId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const videoId = input.videoId;
+      const viewerId = ctx.user.id;
+
+      // Check if this user already has a view record for this video
+      const [existingVideoView] = await db
+        .select()
+        .from(videoViewsTable)
+        .where(
+          and(
+            eq(videoViewsTable.videoId, videoId),
+            eq(videoViewsTable.viewerId, viewerId)
+          )
+        );
+
+      // If a view already exists for this user/video pair, return it
+      if (existingVideoView) {
+        return existingVideoView;
+      }
+
+      // Otherwise, create and return a new video view record
+      const [createdVideoView] = await db
+        .insert(videoViewsTable)
+        .values({
+          viewerId,
+          videoId,
+        })
+        .returning();
+
+      return createdVideoView;
+    }),
+  /**
+   * Fetch a single video's details, uploader info, and count of views.
+   *
+   * - Accepts: videoId (UUID).
+   * - Returns: The full video object, uploader (as "user"), and count of video views.
+   * - Throws: NOT_FOUND error if no video with that ID exists.
+   */
+  /**
+   * getOne - Fetch the details for a single video, including:
+   *   - All video fields,
+   *   - The uploader's user profile,
+   *   - View count, like/dislike counts,
+   *   - The current signed-in user's reaction ("like"/"dislike"/undefined) if available.
+   *
+   * Throws an error if the video doesn't exist.
+   */
+  getOne: baseProcedure
+    .input(z.object({ videoId: z.uuid() })) // input expects a videoId of type UUID
+    .query(async ({ input, ctx }) => {
+      // Extract the Clerk user ID from context (set if user is signed in, undefined otherwise)
+      const { clerkUserId } = ctx;
+      let userId; // Will hold current DB user id if available
+
+      // Attempt to find the database user for the currently authenticated Clerk user,
+      // which allows us to determine if we should resolve the user's reaction to this video.
+      const [user] = await db
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.clerkId, clerkUserId ? [clerkUserId] : []));
+
+      if (user) {
+        // Set userId to our own DB user UUID (not the Clerk ID)
+        userId = user.id;
+      }
+
+      // Define a CTE for this user's reactions to videos, so we can easily join/view them later
+      const viewerReaction = db.$with("viewer_reactions").as(
+        db
+          .select({
+            videoId: videoReactionTable.videoId,
+            type: videoReactionTable.type, // Enum value: 'like' | 'dislike'
+          })
+          .from(videoReactionTable)
+          .where(inArray(videoReactionTable.userId, userId ? [userId] : []))
+      );
+
+      // Main query for the requested video: includes dense aggregations
+      // Joins uploader profile, aggregates view and reaction counts,
+      // retrieves the current user's reaction if available.
       const [existingVideo] = await db
+        .with(viewerReaction)
         .select({
-          ...getTableColumns(videoTable),
+          ...getTableColumns(videoTable), // all columns from videoTable
           user: {
-            ...getTableColumns(usersTable),
+            ...getTableColumns(usersTable), // all columns from usersTable as "user"
           },
+          // Count the number of views registered for this video (across all users)
+          viewsCount: db.$count(
+            videoViewsTable,
+            eq(videoViewsTable.videoId, videoTable.id)
+          ),
+          // Count of "like" reactions for this video
+          likeCount: db.$count(
+            videoReactionTable,
+            and(
+              eq(videoReactionTable.videoId, videoTable.id),
+              eq(videoReactionTable.type, "like")
+            )
+          ),
+          // Count of "dislike" reactions for this video
+          dislikeCount: db.$count(
+            videoReactionTable,
+            and(
+              eq(videoReactionTable.videoId, videoTable.id),
+              eq(videoReactionTable.type, "dislike")
+            )
+          ),
+          // The type of reaction ("like"/"dislike"/undefined) this user gave, if any
+          currentViewerReaction: viewerReaction.type,
         })
         .from(videoTable)
-        .innerJoin(usersTable, eq(videoTable.uploaderId, usersTable.id))
-        .where(eq(videoTable.id, input.videoId));
+        // Join user profile (the uploader) on the video
+        .innerJoin(usersTable, eq(videoTable.uploaderId, usersTable.id)) // join uploader info
+        // Join the CTE for viewer reactions: will be undefined for guests or if user has not reacted
+        .leftJoin(viewerReaction, eq(viewerReaction.videoId, videoTable.id))
+        // Only match the requested video by id
+        .where(eq(videoTable.id, input.videoId))
+        // Group results by these fields to support aggregates and joins
+        .groupBy(videoTable.id, usersTable.id, viewerReaction.type);
+
+      // If no matching video is found, throw a tRPC NOT_FOUND error
       if (!existingVideo) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "There is no video found in Database",
         });
       }
+      // Success: return the enriched video object
       return existingVideo;
     }),
   /**
