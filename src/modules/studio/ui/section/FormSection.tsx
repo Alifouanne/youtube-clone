@@ -60,6 +60,7 @@ import { cn, snakeCaseToTitle } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import Image from "next/image";
 import ThumbnailUploadModal from "../components/ThumbnailUploadModal";
 import {
@@ -77,7 +78,106 @@ interface FormSectionProps {
 
 // Skeleton shown while loading data (fallback for Suspense)
 const FormSectionSkeleton = () => {
-  return <div>Loading...</div>;
+  return (
+    <div className="space-y-6 animate-pulse min-h-[809.534px] min-w-[953.281px]">
+      {/* Header skeleton */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-40 rounded-md" />
+          <Skeleton className="h-3 w-64 rounded-md" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-9 w-32 rounded-md" />
+          <Skeleton className="h-9 w-9 rounded-md" />
+        </div>
+      </div>
+
+      {/* Main grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* Left column */}
+        <div className="space-y-8 lg:col-span-3">
+          <div className="space-y-6">
+            {/* Title */}
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-16 rounded-md" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-10 w-full rounded-md" />
+                <Skeleton className="h-10 w-10 rounded-md" />
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-24 rounded-md" />
+              <div className="relative">
+                <Skeleton className="h-40 w-full rounded-md" />
+                <div className="absolute right-2 bottom-2 flex items-center gap-2">
+                  <Skeleton className="h-7 w-7 rounded-md" />
+                  <Skeleton className="h-6 w-24 rounded-md" />
+                </div>
+              </div>
+            </div>
+
+            {/* Thumbnail */}
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <div className="relative h-[84px] w-[153px]">
+                <Skeleton className="h-full w-full rounded-sm" />
+                <div className="absolute top-1 right-1">
+                  <Skeleton className="h-7 w-7 rounded-md" />
+                </div>
+              </div>
+            </div>
+
+            {/* Category */}
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <Skeleton className="h-10 w-64 rounded-md" />
+            </div>
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          <div className="overflow-hidden border-2 rounded-md">
+            <div className="aspect-video bg-muted">
+              <Skeleton className="h-full w-full rounded-none" />
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Video link */}
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <Skeleton className="h-3 w-20 rounded-md" />
+                    <Skeleton className="h-4 w-56 rounded-md" />
+                  </div>
+                  <Skeleton className="h-8 w-8 shrink-0 rounded-md" />
+                </div>
+              </div>
+
+              {/* Status and subtitles */}
+              <div className="space-y-4 pt-4 border-t">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-4 w-20 rounded-md" />
+                  <Skeleton className="h-5 w-24 rounded-full" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-4 w-20 rounded-md" />
+                  <Skeleton className="h-5 w-28 rounded-full" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Visibility */}
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-20 rounded-md" />
+            <Skeleton className="h-10 w-48 rounded-md" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Top-level component, containing error boundary and suspense
@@ -258,7 +358,10 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
             </p>
           </div>
           <div className="flex items-center gap-x-2 ">
-            <Button type="submit" disabled={update.isPending}>
+            <Button
+              type="submit"
+              disabled={update.isPending || form.formState.isDirty}
+            >
               {update.isPending ? (
                 <>
                   <Spinner /> Saving...

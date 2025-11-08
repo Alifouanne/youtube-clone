@@ -1,7 +1,7 @@
 // --------------------------- IMPORTS AND DEPENDENCIES ---------------------------
 // Import database instance and schema/table definitions for videos
 import { db } from "@/database";
-import { videoTable, videoUpdateSchema } from "@/database/schema";
+import { usersTable, videoTable, videoUpdateSchema } from "@/database/schema";
 
 // Import Mux client for video asset management (uploads/processing/deletions)
 import { mux } from "@/lib/mux";
@@ -10,13 +10,17 @@ import { mux } from "@/lib/mux";
 import { workflow } from "@/lib/workflow";
 
 // Import tRPC helpers to define restricted (authenticated) endpoints and routers
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import {
+  baseProcedure,
+  createTRPCRouter,
+  protectedProcedure,
+} from "@/trpc/init";
 
 // tRPC error-handling construct for clear error signaling to consumers
 import { TRPCError } from "@trpc/server";
 
 // Import Drizzle ORM helpers for query composition
-import { and, eq } from "drizzle-orm";
+import { and, eq, getTableColumns } from "drizzle-orm";
 
 // Import UploadThing API for managing uploads/removals of thumbnail and preview files
 import { UTApi } from "uploadthing/server";
@@ -37,6 +41,27 @@ import z from "zod";
  *   - Creation of new uploads with Mux/session bootstrap
  */
 export const videoRouter = createTRPCRouter({
+  getOne: baseProcedure
+    .input(z.object({ videoId: z.uuid() }))
+    .query(async ({ input }) => {
+      const [existingVideo] = await db
+        .select({
+          ...getTableColumns(videoTable),
+          user: {
+            ...getTableColumns(usersTable),
+          },
+        })
+        .from(videoTable)
+        .innerJoin(usersTable, eq(videoTable.uploaderId, usersTable.id))
+        .where(eq(videoTable.id, input.videoId));
+      if (!existingVideo) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "There is no video found in Database",
+        });
+      }
+      return existingVideo;
+    }),
   /**
    * Trigger a background workflow to generate a suggested title for a video.
    * Only the authenticated owner can request this.
