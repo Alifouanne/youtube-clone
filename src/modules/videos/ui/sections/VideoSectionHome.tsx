@@ -8,6 +8,7 @@ import { ErrorBoundary } from "react-error-boundary";
 import VideoPlayer from "../components/VideoPlayer";
 import VideoBanner from "../components/VideoBanner";
 import VideoTopRow from "../components/VideoTopRow";
+import { useAuth } from "@clerk/nextjs";
 
 interface VideoSectionHomeProps {
   videoId: string;
