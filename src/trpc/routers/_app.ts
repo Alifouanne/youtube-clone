@@ -11,6 +11,7 @@
 
 import { categoriesRouter } from "@/modules/categories/server/procedures";
 import { studioRouter } from "@/modules/studio/server/procedures";
+import { subscriptionRouter } from "@/modules/subscription/server/procedure";
 import { videoRouter } from "@/modules/videos/server/procedures";
 import { createTRPCRouter } from "../init";
 
@@ -22,6 +23,7 @@ export const appRouter = createTRPCRouter({
   categories: categoriesRouter,
   studio: studioRouter,
   videos: videoRouter,
+  subscriptions: subscriptionRouter,
 });
 
 // Export type definition of API for strong typing on the client

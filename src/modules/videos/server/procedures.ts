@@ -2,6 +2,7 @@
 // Import database instance and schema/table definitions for videos
 import { db } from "@/database";
 import {
+  subscriptionTable,
   usersTable,
   videoReactionTable,
   videoTable,
@@ -26,7 +27,7 @@ import {
 import { TRPCError } from "@trpc/server";
 
 // Import Drizzle ORM helpers for query composition
-import { and, eq, getTableColumns, inArray } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNotNull } from "drizzle-orm";
 
 // Import UploadThing API for managing uploads/removals of thumbnail and preview files
 import { UTApi } from "uploadthing/server";
@@ -206,6 +207,39 @@ export const videoRouter = createTRPCRouter({
    *   - The current signed-in user's reaction ("like"/"dislike"/undefined) if available.
    *
    * Throws an error if the video doesn't exist.
+   *
+   *
+   * DETAILED LOGIC FLOW:
+   * ------------------------------------------------------------------------------------------------------
+   * 1. The endpoint takes a videoId as input and is optionally aware of the current signed-in user (via ctx).
+   *
+   * 2. It attempts to find the DB user corresponding to the currently authenticated Clerk user. This is
+   *    required to lookup user-specific information, such as the user's reaction to this video and
+   *    whether the user is subscribed to the uploader.
+   *
+   * 3. Two WITH (CTE) clauses are established in the query:
+   *    - viewerReaction: contains the current viewer's reactions (like/dislike) to each video.
+   *    - viewerSubscription: all subscriptions by the viewer (for use in checking channel subscription).
+   *
+   * 4. The core SELECT:
+   *    - Joins the video to its uploader's user row (usersTable).
+   *    - Includes all video fields and all uploader user fields.
+   *    - Aggregates:
+   *        - Total views for the video, by counting rows in the videoViewsTable.
+   *        - Total likes and dislikes (separate counts for each type in videoReactionTable).
+   *        - User's own reaction (if logged in, via left join on viewerReaction).
+   *        - Whether the viewer is subscribed to the video's uploader (using viewerSubscription).
+   *        - Subscription count for the uploader.
+   *    - Grouping is done by video ID, user ID, and the viewer's reaction for correct aggregation.
+   *
+   * 5. The query returns a single object combining:
+   *    - Video data
+   *    - Uploader (user) data, including viewer subscription status and uploader's subscriber count
+   *    - Number of views, likes, dislikes
+   *    - The current viewer's reaction type if present
+   *
+   * 6. If there is no matching video, a NOT_FOUND error is thrown.
+   * ------------------------------------------------------------------------------------------------------
    */
   getOne: baseProcedure
     .input(z.object({ videoId: z.uuid() })) // input expects a videoId of type UUID
@@ -236,16 +270,31 @@ export const videoRouter = createTRPCRouter({
           .from(videoReactionTable)
           .where(inArray(videoReactionTable.userId, userId ? [userId] : []))
       );
+      const viewerSubscription = db.$with("subscriptions_count").as(
+        db
+          .select()
+          .from(subscriptionTable)
+          .where(
+            inArray(subscriptionTable.subscriberId, userId ? [userId] : [])
+          )
+      );
 
       // Main query for the requested video: includes dense aggregations
       // Joins uploader profile, aggregates view and reaction counts,
       // retrieves the current user's reaction if available.
       const [existingVideo] = await db
-        .with(viewerReaction)
+        .with(viewerReaction, viewerSubscription)
         .select({
           ...getTableColumns(videoTable), // all columns from videoTable
           user: {
-            ...getTableColumns(usersTable), // all columns from usersTable as "user"
+            ...getTableColumns(usersTable), // all columns from usersTable as "user",
+            isSubscribed: isNotNull(viewerSubscription.subscriberId).mapWith(
+              Boolean
+            ),
+            subscriptionCount: db.$count(
+              subscriptionTable,
+              eq(subscriptionTable.channelId, usersTable.id)
+            ),
           },
           // Count the number of views registered for this video (across all users)
           viewsCount: db.$count(
@@ -276,10 +325,14 @@ export const videoRouter = createTRPCRouter({
         .innerJoin(usersTable, eq(videoTable.uploaderId, usersTable.id)) // join uploader info
         // Join the CTE for viewer reactions: will be undefined for guests or if user has not reacted
         .leftJoin(viewerReaction, eq(viewerReaction.videoId, videoTable.id))
+        .leftJoin(
+          viewerSubscription,
+          eq(viewerSubscription.channelId, usersTable.id)
+        )
         // Only match the requested video by id
-        .where(eq(videoTable.id, input.videoId))
-        // Group results by these fields to support aggregates and joins
-        .groupBy(videoTable.id, usersTable.id, viewerReaction.type);
+        .where(eq(videoTable.id, input.videoId));
+      // Group results by these fields to support aggregates and joins
+      // .groupBy(videoTable.id, usersTable.id, viewerReaction.type);
 
       // If no matching video is found, throw a tRPC NOT_FOUND error
       if (!existingVideo) {

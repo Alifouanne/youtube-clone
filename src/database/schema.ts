@@ -38,7 +38,11 @@ export const usersTable = pgTable(
 export const userRelations = relations(usersTable, ({ many }) => ({
   videos: many(videoTable), // User can have many videos
   videoViews: many(videoViewsTable), // User can have many video views
-  videoReactions: many(videoReactionTable), // Add comment for new line: user can have many video reactions (like/dislike)
+  videoReactions: many(videoReactionTable), // user can have many video reactions (like/dislike)
+  subscriptionsAsSubscriber: many(subscriptionTable, {
+    relationName: "subscriber",
+  }),
+  subscriptionsAsChannel: many(subscriptionTable, { relationName: "channel" }),
 }));
 
 // ==============================
@@ -124,7 +128,7 @@ export const videoRelations = relations(videoTable, ({ one, many }) => ({
     references: [categoriesTable.id],
   }),
   views: many(videoViewsTable), // A video can have many views
-  reactions: many(videoReactionTable), // Add comment for new line: a video can have many reactions (like/dislike)
+  reactions: many(videoReactionTable), // a video can have many reactions (like/dislike)
 }));
 
 // ==============================
@@ -164,7 +168,7 @@ export const videoViewsRelations = relations(videoViewsTable, ({ one }) => ({
   }),
 }));
 
-export const reactionTypeEnum = pgEnum("reaction_type", ["like", "dislike"]); // Add comment for new line: Enum for "like" and "dislike" reaction types
+export const reactionTypeEnum = pgEnum("reaction_type", ["like", "dislike"]); // Enum for "like" and "dislike" reaction types
 
 export const videoReactionTable = pgTable(
   "video_reactions",
@@ -187,17 +191,65 @@ export const videoReactionTable = pgTable(
   ]
 );
 
+// Defines the relationships for video reactions: each reaction belongs to a user and a video
 export const videoReactionsRelations = relations(
   videoReactionTable,
   ({ one }) => ({
     users: one(usersTable, {
       fields: [videoReactionTable.userId],
       references: [usersTable.id],
-    }), // Add comment for new line: reaction belongs to a user
+    }), // reaction belongs to a user
     videos: one(videoTable, {
       fields: [videoReactionTable.videoId],
       references: [videoTable.id],
-    }), // Add comment for new line: reaction belongs to a video
+    }), // reaction belongs to a video
+  })
+);
+
+// Defines the subscriptions table schema.
+// Each row means that subscriberId (a User) is following channelId (another User).
+export const subscriptionTable = pgTable(
+  "subscriptions",
+  {
+    // User who is subscribing
+    subscriberId: uuid("subscriber_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    // User who is being subscribed to (the channel/user)
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    // Timestamp of when the subscription was created
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    // Timestamp of when the subscription was last updated
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite primary key: ensures uniqueness of each (channelId, subscriberId) pair
+    primaryKey({
+      name: "subscription_pk",
+      columns: [t.channelId, t.subscriberId],
+    }),
+  ]
+);
+
+// Defines the relationships for the subscriptions table:
+// Each subscription row models a user (subscriber) following another user (channel).
+export const subscriptionRelations = relations(
+  subscriptionTable,
+  ({ one }) => ({
+    // The user who does the subscribing ("subscriber")
+    subscriber: one(usersTable, {
+      fields: [subscriptionTable.subscriberId], // Field on subscriptionTable that links to user
+      references: [usersTable.id], // References the 'id' field in usersTable
+      relationName: "subscriber", // Unique relation name for this direction
+    }),
+    // The user who is being subscribed to ("channel")
+    channel: one(usersTable, {
+      fields: [subscriptionTable.channelId], // Field on subscriptionTable that links to user (the "channel")
+      references: [usersTable.id], // References the 'id' field in usersTable
+      relationName: "channel", // Unique relation name for this direction
+    }),
   })
 );
 
@@ -215,9 +267,15 @@ export const videoViewsInsertSchema = createInsertSchema(videoViewsTable);
 export const videoViewsUpdateSchema = createUpdateSchema(videoViewsTable);
 export const videoViewsSelectSchema = createSelectSchema(videoViewsTable);
 
+// Schemas for insert, update, select operations on video reactions
 export const videoReactionsInsertSchema =
-  createInsertSchema(videoReactionTable); // Add comment for new line: Insert schema for video reactions
+  createInsertSchema(videoReactionTable); // Insert schema for video reactions
 export const videoReactionsUpdateSchema =
-  createUpdateSchema(videoReactionTable); // Add comment for new line: Update schema for video reactions
+  createUpdateSchema(videoReactionTable); // Update schema for video reactions
 export const videoReactionsSelectSchema =
-  createSelectSchema(videoReactionTable); // Add comment for new line: Select schema for video reactions
+  createSelectSchema(videoReactionTable); // Select schema for video reactions
+
+// Schemas for insert, update, select operations on subscriptions
+export const subscriptionInsertSchema = createInsertSchema(subscriptionTable);
+export const subscriptionUpdateSchema = createUpdateSchema(subscriptionTable);
+export const subscriptionSelectSchema = createSelectSchema(subscriptionTable);
