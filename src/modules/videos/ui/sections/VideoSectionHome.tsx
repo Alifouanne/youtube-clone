@@ -6,9 +6,9 @@ import ErrorFallback from "@/modules/home/ui/fallbacks/ErrorFallback";
 import { trpc } from "@/trpc/client";
 import { Suspense, useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
-import VideoPlayer from "../components/VideoPlayer";
+import VideoPlayer, { VideoPlayerSkeleton } from "../components/VideoPlayer";
 import VideoBanner from "../components/VideoBanner";
-import VideoTopRow from "../components/VideoTopRow";
+import VideoTopRow, { VideoTopRowSkeleton } from "../components/VideoTopRow";
 import { useAuth } from "@clerk/nextjs";
 
 // Props definition for the main video section component
@@ -26,7 +26,7 @@ interface VideoSectionHomeProps {
 const VideoSectionHome = ({ videoId }: VideoSectionHomeProps) => {
   return (
     // Suspense boundary shows fallback while loading (SSR/async support)
-    <Suspense fallback={<>Loading...</>}>
+    <Suspense fallback={<VideoSectionHomeSkeleton />}>
       {/* ErrorBoundary catches rendering errors and shows fallback */}
       <ErrorBoundary
         fallback={
@@ -40,6 +40,14 @@ const VideoSectionHome = ({ videoId }: VideoSectionHomeProps) => {
         <VideoSectionHomeSuspense videoId={videoId} />
       </ErrorBoundary>
     </Suspense>
+  );
+};
+const VideoSectionHomeSkeleton = () => {
+  return (
+    <>
+      <VideoPlayerSkeleton />
+      <VideoTopRowSkeleton />
+    </>
   );
 };
 

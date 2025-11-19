@@ -296,6 +296,7 @@ export const videoRouter = createTRPCRouter({
               eq(subscriptionTable.channelId, usersTable.id)
             ),
           },
+
           // Count the number of views registered for this video (across all users)
           viewsCount: db.$count(
             videoViewsTable,

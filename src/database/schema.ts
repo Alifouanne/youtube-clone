@@ -9,6 +9,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 import {
   createInsertSchema,
@@ -43,6 +44,7 @@ export const userRelations = relations(usersTable, ({ many }) => ({
     relationName: "subscriber",
   }),
   subscriptionsAsChannel: many(subscriptionTable, { relationName: "channel" }),
+  comments: many(commentsTable),
 }));
 
 // ==============================
@@ -129,6 +131,7 @@ export const videoRelations = relations(videoTable, ({ one, many }) => ({
   }),
   views: many(videoViewsTable), // A video can have many views
   reactions: many(videoReactionTable), // a video can have many reactions (like/dislike)
+  comments: many(commentsTable),
 }));
 
 // ==============================
@@ -168,6 +171,9 @@ export const videoViewsRelations = relations(videoViewsTable, ({ one }) => ({
   }),
 }));
 
+// ==============================
+// Reaction TABLE AND RELATIONS
+// ==============================
 export const reactionTypeEnum = pgEnum("reaction_type", ["like", "dislike"]); // Enum for "like" and "dislike" reaction types
 
 export const videoReactionTable = pgTable(
@@ -205,6 +211,9 @@ export const videoReactionsRelations = relations(
     }), // reaction belongs to a video
   })
 );
+// ==============================
+// Subscriptions TABLE AND RELATIONS
+// ==============================
 
 // Defines the subscriptions table schema.
 // Each row means that subscriberId (a User) is following channelId (another User).
@@ -254,6 +263,72 @@ export const subscriptionRelations = relations(
 );
 
 // ==============================
+// Comments TABLE AND RELATIONS
+// ==============================
+
+// Define the 'comments' table schema for storing comments on videos.
+export const commentsTable = pgTable(
+  "comments",
+  {
+    // Unique identifier for each comment (UUID, auto-generated if not provided)
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    // The text content of the comment, limited to 1000 characters
+    content: varchar("content", { length: 1000 }).notNull(),
+
+    // The ID of the video that this comment belongs to (foreign key)
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => videoTable.id, { onDelete: "cascade" }),
+
+    // The ID of the user who wrote the comment (foreign key)
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+
+    // Uncomment the following line to support nested comments (replies)
+    // parentId: integer("parent_id"),
+
+    // Timestamp for when the comment was created (auto-filled)
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+
+    // Timestamp for when the comment was last updated (auto-filled)
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // Unique index on the videoId (for efficient lookups of comments for a video)
+    uniqueIndex("comments_video_id_idx").on(t.videoId),
+
+    // Foreign key reference for parent comments (for threaded replies), if needed
+    // foreignKey({
+    //   columns: [t.parentId],
+    //   foreignColumns: [t.id],
+    // }),
+  ]
+);
+
+// Define relationships for the 'comments' table
+export const commentsRelations = relations(commentsTable, ({ one, many }) => ({
+  // Each comment belongs to one video
+  video: one(videoTable, {
+    fields: [commentsTable.videoId],
+    references: [videoTable.id],
+  }),
+  // Each comment belongs to one user (the author)
+  user: one(usersTable, {
+    fields: [commentsTable.userId],
+    references: [usersTable.id],
+  }),
+  // parent: one(commentsTable, {
+  //   fields: [commentsTable.parentId],
+  //   references: [commentsTable.id],
+  //   relationName: "parentComment", // parent Comment
+  // }),
+  // replies: many(commentsTable, { relationName: "parentComment" }), //child comment (reply)
+  // reactions:
+}));
+
+// ==============================
 // ZOD SCHEMAS FOR CRUD VALIDATION
 // ==============================
 
@@ -279,3 +354,8 @@ export const videoReactionsSelectSchema =
 export const subscriptionInsertSchema = createInsertSchema(subscriptionTable);
 export const subscriptionUpdateSchema = createUpdateSchema(subscriptionTable);
 export const subscriptionSelectSchema = createSelectSchema(subscriptionTable);
+
+// Schemas for insert, update, select operations on comments
+export const commentsInsertSchema = createInsertSchema(commentsTable);
+export const commentsUpdateSchema = createUpdateSchema(commentsTable);
+export const commentsSelectSchema = createSelectSchema(commentsTable);
