@@ -1,6 +1,7 @@
 // Importing necessary helpers from drizzle-orm and drizzle-zod
 import { relations } from "drizzle-orm";
 import {
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -297,7 +298,7 @@ export const commentsTable = pgTable(
   },
   (t) => [
     // Unique index on the videoId (for efficient lookups of comments for a video)
-    uniqueIndex("comments_video_id_idx").on(t.videoId),
+    index("comments_video_id_idx").on(t.videoId),
 
     // Foreign key reference for parent comments (for threaded replies), if needed
     // foreignKey({

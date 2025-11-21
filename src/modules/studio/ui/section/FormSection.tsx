@@ -370,7 +370,7 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                 "Save Changes"
               )}
             </Button>
-            <DropdownMenu>
+            <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
                   <EllipsisVerticalIcon className="size-4" />
@@ -532,7 +532,7 @@ const FormSectionSuspense = ({ videoId }: FormSectionProps) => {
                         className="object-cover"
                       />
                       {/* Dropdown to choose thumbnail actions */}
-                      <DropdownMenu>
+                      <DropdownMenu modal={false}>
                         <DropdownMenuTrigger
                           asChild
                           id="form-video-categoryId"

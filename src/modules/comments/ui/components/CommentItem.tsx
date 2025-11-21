@@ -1,3 +1,4 @@
+"use client";
 import Link from "next/link";
 import { CommentGetManyOutput } from "../../types";
 import StudioSidebarAvatar from "@/modules/studio/ui/components/studio-sidebar/StudioSidebarAvatar";
@@ -7,18 +8,49 @@ import {
   ThumbsDown,
   MessageSquare,
   MoreVertical,
+  Trash2Icon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { trpc } from "@/trpc/client";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuth, useClerk } from "@clerk/nextjs";
+import { toast } from "sonner";
 
 interface CommentItemProps {
-  comment: CommentGetManyOutput[number];
+  comment: CommentGetManyOutput["items"][number];
 }
 
 const CommentItem = ({ comment }: CommentItemProps) => {
+  const clerk = useClerk();
+  const utils = trpc.useUtils();
   const [isLiked, setIsLiked] = useState(false);
   const [isDisliked, setIsDisliked] = useState(false);
   const [showReply, setShowReply] = useState(false);
+  const { userId } = useAuth();
+  const remove = trpc.comments.remove.useMutation({
+    onMutate: () => {
+      const toastId = toast.loading("Deleting the comment...");
+      return { toastId };
+    },
+    onSuccess: (_, __, context) => {
+      if (context?.toastId) toast.dismiss(context.toastId);
+      toast.success("Comment deleted successfully");
+      utils.comments.getMany.invalidate({ videoId: comment.videoId });
+    },
+    onError: (error, _, context) => {
+      if (context?.toastId) toast.dismiss(context.toastId);
+      toast.error("Something went wrong");
+      if (error.data?.code === "UNAUTHORIZED") {
+        clerk.openSignIn();
+      }
+    },
+  });
 
   return (
     <div className="group relative py-3 transition-colors hover:bg-accent/30 rounded-lg px-2 -mx-2">
@@ -49,13 +81,32 @@ const CommentItem = ({ comment }: CommentItemProps) => {
               </div>
             </Link>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-            >
-              <MoreVertical className="h-4 w-4" />
-            </Button>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => {}}>
+                  <MessageSquare className="size-4" />
+                  Reply
+                </DropdownMenuItem>
+                {comment.user.clerkId === userId && (
+                  <DropdownMenuItem
+                    onClick={() => remove.mutate({ id: comment.id })}
+                    className="group"
+                  >
+                    <Trash2Icon />
+                    <span className="text-red-500">Delete</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <p className="text-sm leading-relaxed mb-2 text-foreground/90">
