@@ -1,6 +1,7 @@
 // Importing necessary helpers from drizzle-orm and drizzle-zod
 import { relations } from "drizzle-orm";
 import {
+  foreignKey,
   index,
   integer,
   pgEnum,
@@ -46,6 +47,7 @@ export const userRelations = relations(usersTable, ({ many }) => ({
   }),
   subscriptionsAsChannel: many(subscriptionTable, { relationName: "channel" }),
   comments: many(commentsTable),
+  commentReactions: many(commentReactionTable),
 }));
 
 // ==============================
@@ -288,7 +290,7 @@ export const commentsTable = pgTable(
       .references(() => usersTable.id, { onDelete: "cascade" }),
 
     // Uncomment the following line to support nested comments (replies)
-    // parentId: integer("parent_id"),
+    parentId: uuid("parent_id"),
 
     // Timestamp for when the comment was created (auto-filled)
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -301,10 +303,11 @@ export const commentsTable = pgTable(
     index("comments_video_id_idx").on(t.videoId),
 
     // Foreign key reference for parent comments (for threaded replies), if needed
-    // foreignKey({
-    //   columns: [t.parentId],
-    //   foreignColumns: [t.id],
-    // }),
+    foreignKey({
+      columns: [t.parentId],
+      foreignColumns: [t.id],
+      name: "comments_parent_id_fk",
+    }).onDelete("cascade"),
   ]
 );
 
@@ -320,14 +323,67 @@ export const commentsRelations = relations(commentsTable, ({ one, many }) => ({
     fields: [commentsTable.userId],
     references: [usersTable.id],
   }),
-  // parent: one(commentsTable, {
-  //   fields: [commentsTable.parentId],
-  //   references: [commentsTable.id],
-  //   relationName: "parentComment", // parent Comment
-  // }),
-  // replies: many(commentsTable, { relationName: "parentComment" }), //child comment (reply)
-  // reactions:
+  commentReactions: many(commentReactionTable),
+  parent: one(commentsTable, {
+    fields: [commentsTable.parentId],
+    references: [commentsTable.id],
+    relationName: "parentComment", // parent Comment
+  }),
+  replies: many(commentsTable, { relationName: "parentComment" }), //child comment (reply)
 }));
+
+// ==============================
+// COMMENT REACTIONS TABLE AND RELATIONS
+// ==============================
+
+// Defines the 'comment_reactions' table schema
+export const commentReactionTable = pgTable(
+  "comment_reactions",
+  {
+    // The ID of the comment that was reacted to (foreign key)
+    commentId: uuid("comment_id")
+      .notNull()
+      .references(() => commentsTable.id, { onDelete: "cascade" }),
+
+    // The ID of the user who made the reaction (foreign key)
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+
+    // The type of reaction (e.g., like/dislike) as an enum
+    type: reactionTypeEnum("type").notNull(),
+
+    // Timestamp when reaction was last updated
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+
+    // Timestamp when reaction was created
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite primary key ensures one reaction per user per comment
+    primaryKey({
+      name: "comment_reactions_pk",
+      columns: [t.commentId, t.userId],
+    }),
+  ]
+);
+
+// Defines the relationships for the 'comment_reactions' table
+export const commentReactionRelations = relations(
+  commentReactionTable,
+  ({ one }) => ({
+    // Each comment reaction belongs to one user
+    user: one(usersTable, {
+      fields: [commentReactionTable.userId],
+      references: [usersTable.id],
+    }),
+    // Each comment reaction belongs to one comment
+    comment: one(commentsTable, {
+      fields: [commentReactionTable.commentId],
+      references: [commentsTable.id],
+    }),
+  })
+);
 
 // ==============================
 // ZOD SCHEMAS FOR CRUD VALIDATION

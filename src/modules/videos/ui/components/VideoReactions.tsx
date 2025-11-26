@@ -69,30 +69,125 @@ const VideoReactions = ({
 
   // Like mutation
   const like = trpc.videos.like.useMutation({
-    onError: (error) => {
-      toast.error("Something went wrong ");
+    onMutate: async () => {
+      // 1. Cancel any outgoing refetches for this video to avoid overwrites
+      await utils.videos.getOne.cancel({ videoId });
+
+      // 2. Snapshot the previous data
+      const previousData = utils.videos.getOne.getData({ videoId });
+
+      // 3. Optimistically update the cache
+      if (previousData) {
+        utils.videos.getOne.setData({ videoId }, (old) => {
+          if (!old) return old;
+
+          // Logic: Toggle like
+          // If already liked -> remove like (decrement likeCount, set reaction null)
+          // If disliked -> remove dislike (decrement dislikeCount), add like (increment likeCount, set reaction like)
+          // If nothing -> add like (increment likeCount, set reaction like)
+
+          const wasLiked = old.currentViewerReaction === "like";
+          const wasDisliked = old.currentViewerReaction === "dislike";
+
+          let newLikeCount = old.likeCount;
+          let newDislikeCount = old.dislikeCount;
+          let newReaction: "like" | "dislike" | null = "like";
+
+          if (wasLiked) {
+            newLikeCount -= 1;
+            newReaction = null;
+          } else if (wasDisliked) {
+            newDislikeCount -= 1;
+            newLikeCount += 1;
+          } else {
+            newLikeCount += 1;
+          }
+
+          return {
+            ...old,
+            likeCount: newLikeCount,
+            dislikeCount: newDislikeCount,
+            currentViewerReaction: newReaction,
+          };
+        });
+      }
+
+      // 4. Return context with the previous data for rollback
+      return { previousData };
+    },
+    onError: (error, _, context) => {
+      // If mutation fails, roll back to the snapshot
+      if (context?.previousData) {
+        utils.videos.getOne.setData({ videoId }, context.previousData);
+      }
+      toast.error("Something went wrong");
       // If unauthorized, prompt user to sign in
       if (error.data?.code === "UNAUTHORIZED") {
         clerk.openSignIn();
       }
     },
-    onSuccess: () => {
-      // Invalidate this video's cache to refresh counts/reaction
+    onSettled: () => {
+      // Always refetch after error or success to ensure data is in sync
       utils.videos.getOne.invalidate({ videoId });
     },
   });
 
-  // Dislike mutation
+  // Dislike mutation with Optimistic Update
   const dislike = trpc.videos.dislike.useMutation({
-    onError: (error) => {
-      toast.error("Something went wrong ");
+    onMutate: async () => {
+      // 1. Cancel outgoing refetches
+      await utils.videos.getOne.cancel({ videoId });
+
+      // 2. Snapshot previous data
+      const previousData = utils.videos.getOne.getData({ videoId });
+
+      // 3. Optimistically update cache
+      if (previousData) {
+        utils.videos.getOne.setData({ videoId }, (old) => {
+          if (!old) return old;
+
+          const wasLiked = old.currentViewerReaction === "like";
+          const wasDisliked = old.currentViewerReaction === "dislike";
+
+          let newLikeCount = old.likeCount;
+          let newDislikeCount = old.dislikeCount;
+          let newReaction: "like" | "dislike" | null = "dislike";
+
+          if (wasDisliked) {
+            newDislikeCount -= 1;
+            newReaction = null;
+          } else if (wasLiked) {
+            newLikeCount -= 1;
+            newDislikeCount += 1;
+          } else {
+            newDislikeCount += 1;
+          }
+
+          return {
+            ...old,
+            likeCount: newLikeCount,
+            dislikeCount: newDislikeCount,
+            currentViewerReaction: newReaction,
+          };
+        });
+      }
+
+      // 4. Return snapshot
+      return { previousData };
+    },
+    onError: (error, _, context) => {
+      // Rollback on error
+      if (context?.previousData) {
+        utils.videos.getOne.setData({ videoId }, context.previousData);
+      }
+      toast.error("Something went wrong");
       // If unauthorized, prompt user to sign in
       if (error.data?.code === "UNAUTHORIZED") {
         clerk.openSignIn();
       }
     },
-    onSuccess: () => {
-      // Invalidate this video's cache to refresh counts/reaction
+    onSettled: () => {
+      // Sync with server
       utils.videos.getOne.invalidate({ videoId });
     },
   });
